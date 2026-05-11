@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 )
 
 type WordCount struct {
@@ -12,28 +13,69 @@ type WordCount struct {
 	Count int
 }
 
-func CountWords(filename string) (map[string]int, error) {
+func CountWordsParallel(filename string, numWorkers int) (map[string]int, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка открытия файла: %w", err)
 	}
 	defer file.Close()
 
-	wordCount := make(map[string]int)
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		word := scanner.Text()
-		if word != "" {
-			wordCount[word]++
+	// Канал для строк
+	lineChan := make(chan string, 10000)
+	
+	// Канал для результатов
+	resultChan := make(chan map[string]int, numWorkers)
+	
+	var wg sync.WaitGroup
+	
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go worker(lineChan, resultChan, &wg)
+	}
+	
+	go func() {
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line != "" {
+				lineChan <- line
+			}
+		}
+		close(lineChan)
+		
+		if err := scanner.Err(); err != nil {
+		}
+	}()
+	
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+	
+	totalCount := make(map[string]int)
+	for partialResult := range resultChan {
+		for word, count := range partialResult {
+			totalCount[word] += count
 		}
 	}
+	
+	return totalCount, nil
+}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("ошибка чтения файла: %w", err)
+func worker(lineChan <-chan string, resultChan chan<- map[string]int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	
+	localCount := make(map[string]int)
+	
+	for line := range lineChan {
+		localCount[line]++
 	}
+	
+	resultChan <- localCount
+}
 
-	return wordCount, nil
+func CountWords(filename string) (map[string]int, error) {
+	return CountWordsParallel(filename, 6)
 }
 
 func PrintResults(wordCount map[string]int) {

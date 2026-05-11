@@ -245,3 +245,41 @@ func createLargeFile(t testing.TB, lines int) string {
 	
 	return tmpFile
 }
+
+func TestCountWordsParallel(t *testing.T) {
+	content := `hello
+world
+hello
+golang
+test
+world
+hello
+`
+
+	tmpFile := createTempFile(t, content)
+	defer os.Remove(tmpFile)
+
+	workers := []int{1, 2, 4, 6, 8}
+	
+	for _, numWorkers := range workers {
+		t.Run(fmt.Sprintf("workers_%d", numWorkers), func(t *testing.T) {
+			result, err := CountWordsParallel(tmpFile, numWorkers)
+			if err != nil {
+				t.Fatalf("Ошибка при подсчёте с %d воркерами: %v", numWorkers, err)
+			}
+			
+			expected := map[string]int{
+				"hello":  3,
+				"world":  2,
+				"golang": 1,
+				"test":   1,
+			}
+			
+			for word, expectedCount := range expected {
+				if result[word] != expectedCount {
+					t.Errorf("Слово '%s': ожидалось %d, получено %d", word, expectedCount, result[word])
+				}
+			}
+		})
+	}
+}
